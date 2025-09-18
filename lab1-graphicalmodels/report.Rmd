@@ -1,0 +1,328 @@
+---
+title: "Lab 1: Graphical Models"
+output:
+  pdf_document: 
+    keep_tex: true
+  html_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+tables: true
+header-includes:
+ \usepackage{float}
+ \setlength{\textfloatsep}{0pt}
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+```{r include=FALSE}
+library(bnlearn)
+library(gRain)
+
+```
+
+## 1. Non equivalent Bayesian networks
+
+Multiple runs of the hill-climbing (HC) algorithm can yield different network structures due to different starting conditions.
+To prove this, we learn an initial network using the BIC and compare it against two more runs of the HC algorithm using the
+BDeu with different imaginary sample sizes. This is implemented as follows.
+
+```{r}
+data(asia)
+
+iss      <- c(5, 10)
+bic_dag  <- hc(asia, score = "bic")
+bde_dags <- list()
+for (i in 1:length(iss)) {
+  bde_dag       <- hc(asia, score = "bde", iss = iss[i])
+  bde_dags[[i]] <- bde_dag
+}
+```
+
+`compare()` takes two networks with the same nodes; the first is the target network, and the second is the current network. For instance, comparing `bic_dag` with the first any of the `bde_dags`, gives
+
+```{r}
+compare(bic_dag,  bde_dags[[1]])
+```
+
+Here, `tp` are the true positive which appear both in target and in current, `fp` are the false positive arcs which appear in current but not in target and `fn` the false negative arcs, which appear in target but not in current.
+
+
+```{r echo=FALSE}
+# compare bic_dag vs each bde_dag
+cmp1 <- compare(bic_dag, bde_dags[[1]])
+cmp2 <- compare(bic_dag, bde_dags[[2]])
+cmp3 <- compare(bde_dags[[1]], bde_dags[[2]])
+
+# results in a single data.frame
+comparison_table <- data.frame(
+  Comparison = c("BIC vs BDeu(iss=5)", "BIC vs BDeu(iss=10)", "BDeu(iss=5) vs BDeu(iss=10)"),
+  TP = c(cmp1[["tp"]], cmp2[["tp"]], cmp3[["tp"]]),
+  FP = c(cmp1[["fp"]], cmp2[["fp"]], cmp3[["fp"]]),
+  FN = c(cmp1[["fn"]], cmp2[["fn"]], cmp3[["fn"]])
+)
+
+knitr::kable(comparison_table, caption = "Comparison of Bayesian networks using `compare()`")
+```
+
+Notice that are not any false negatives. That is, every arc in the target network is also in the current one. Moreover, the following visualization (created using `graphviz.compare`) compares the BIC network and BDE(iss=5) side by side and highlights differences.
+
+```{r echo=FALSE, fig.align="center", fig.cap="Comparisson between BIC and BDE networks", fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+par(mfrow = c(1, 2))
+graphviz.compare(bic_dag, bde_dags[[1]])
+```
+
+Two networks are equivalent if they share the same independence requirements. Clearly, for this example, this cannot be true since the BDE(iss=5) contains more arcs (there are more adjacencies), thus imposing more dependencies.
+
+
+## 2. Posterior probability distribution
+
+Here, we build a classifier that computes the posterior distribution of the $S$ node. To do so, a training set is used to learn the parameters and structure of the network using the `blearn` library. Next, the resulting fitted object is converted to a `gRain` object to perform exact inference. In particular, the posterior probability distribution for each test sample was computed and the most likely class is retrieved. More formally, for each new (test) sample, we want
+
+$$
+\hat{s} =  \arg\max_{s \in {0, 1}} \mathbf{P}(S = s \mid \text{evidence})
+$$
+
+The code is as follows.
+
+```{r}
+# train/test indices.
+n_samples <- nrow(asia)
+tr_size   <- n_samples * .8
+all_index <- seq(1, n_samples) 
+tr_index  <- sample(all_index, size = tr_size)
+te_index  <- setdiff(all_index, tr_index)
+
+# train/test data.
+tr <- asia[tr_index, ]
+te <- asia[te_index,]
+
+# learn structure and fit parameters.
+fitted <- bn.fit(hc(asia), tr)
+
+# convert to grain object.
+grain_bn <- as.grain(fitted)
+
+# Function to classify a single test case.
+# 
+# Args
+# ----
+# sample:   A single sample to classify.
+# bn:       The gRain network object.
+# target:   The target node.
+# evidence: The evidence nodes.
+classify <- function(sample, bn, target, evidence) {
+  evidence <- as.list(sample[evidence])
+  query <- bn |> setEvidence(evidence = evidence) |> querygrain(nodes=target)
+  query <- query[[target]]
+  ifelse(query["yes"] >= query["no"], "yes", "no")
+}
+
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+```
+
+The confusion matrix is given by
+
+```{r echo=FALSE}
+y_true  <- te$S
+cmatrix <- table(Predicted = y_pred, True = y_true)
+accuracy <-  sum(diag(cmatrix)) / sum(cmatrix)
+knitr::kable(cmatrix)
+```
+
+The accuracy on the test set is `r accuracy`.
+
+## 3. Classifying using the Markov blanket
+
+Making use of the custom function `classify` introduced in the previous section, this task can be done as follows.
+
+```{r}
+target   <- "S"
+evidence <- mb(fitted, "S")  # the Markov blanket of S.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+```
+
+The confusion matrix is given by
+
+```{r echo=FALSE}
+y_true   <- te$S
+cmatrix  <- table(Predicted = y_pred, True = y_true)
+accuracy <-  sum(diag(cmatrix)) / sum(cmatrix)
+knitr::kable(cmatrix)
+```
+
+
+In this case, using the Markov blanket of $S$ yields the same classification performance as using all other variables.
+
+
+## 4. Naive Bayes classifier
+
+The naive Bayes classifier has a completely fixed, star-shaped structure: the training variable is connected to each predictor by an arc, and there are no arcs between predictors. To create this graph $\mathcal{G} = \left\{ V, A\right\}$, we can specify the set of arcs $A$ using a matrix with two columns, optionally labelled "from" and "to". That is,
+
+```{r}
+target   <- "S"
+arc_set  <- cbind("S", setdiff(names(tr), c(target))) 
+nb       <- empty.graph(names(tr))  # initialize empty graph.
+arcs(nb) <- arc_set
+```
+
+```{r echo=FALSE, fig.align="center", fig.cap="The naive-bayes clasiifier", fig.height=2, fig.width=4, message=FALSE, warning=FALSE}
+graphviz.plot(nb)
+```
+
+To learn the parameters we can simply call `bn.fit` as before.
+
+```{r}
+fitted_nb <- bn.fit(nb, tr)
+```
+
+
+Inference is done with `gRain` as follows.
+
+```{r}
+grain_bn <- as.grain(fitted_nb)
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+```
+
+Where, again, we have used the custom `classify` function defined above. The confusion matrix is
+
+```{r echo=FALSE}
+y_true  <- te$S
+cmatrix <- table(Predicted = y_pred, True = y_true)
+accuracy <-  sum(diag(cmatrix)) / sum(cmatrix)
+knitr::kable(cmatrix)
+```
+
+
+
+## 5. Comparisson
+
+As expected, the inference done using all evidence vs. using only the Markov blanket is the same. This is
+because the Markov blanket set $M \subset V$, where $V$ is the set of nodes, contains at least
+all the information one need to infer $S$, the target variable, where the variables in $V \setminus M$ are redundant. Moreover, the Naive Bayes classifier achieves `r accuracy` accuracy. This is lower than the results obtained with the full Bayesian network using all evidence or the Markov blanket. This reflects the simplifying assumption of conditional independence in Naive Bayes.
+
+
+
+## 6. Appendix
+
+```r
+library(bnlearn)
+library(gRain)
+
+# 1. Non equivalent Bayesian networks
+data(asia)
+
+iss      <- c(5, 10)
+bic_dag  <- hc(asia, score = "bic")
+bde_dags <- list()
+for (i in 1:length(iss)) {
+  bde_dag       <- hc(asia, score = "bde", iss = iss[i])
+  bde_dags[[i]] <- bde_dag
+}
+
+compare(bic_dag,  bde_dags[[1]])
+
+# compare bic_dag vs each bde_dag
+cmp1 <- compare(bic_dag, bde_dags[[1]])
+cmp2 <- compare(bic_dag, bde_dags[[2]])
+cmp3 <- compare(bde_dags[[1]], bde_dags[[2]])
+
+# results in a single data.frame
+comparison_table <- data.frame(
+  Comparison = c("BIC vs BDeu(iss=5)", "BIC vs BDeu(iss=10)", "BDeu(iss=5) vs BDeu(iss=10)"),
+  TP = c(cmp1[["tp"]], cmp2[["tp"]], cmp3[["tp"]]),
+  FP = c(cmp1[["fp"]], cmp2[["fp"]], cmp3[["fp"]]),
+  FN = c(cmp1[["fn"]], cmp2[["fn"]], cmp3[["fn"]])
+)
+
+knitr::kable(comparison_table, caption = "Comparison of Bayesian networks using `compare()`")
+
+par(mfrow = c(1, 2))
+graphviz.compare(bic_dag, bde_dags[[1]])
+
+
+
+# 2. Posterior probability distribution
+
+# 2. Posterior probability distribution
+
+# train/test indices.
+n_samples <- nrow(asia)
+tr_size   <- n_samples * .8
+all_index <- seq(1, n_samples) 
+tr_index  <- sample(all_index, size = tr_size)
+te_index  <- setdiff(all_index, tr_index)
+
+# train/test data.
+tr <- asia[tr_index, ]
+te <- asia[te_index,]
+
+# learn structure and fit parameters.
+fitted <- bn.fit(hc(asia), tr)
+
+# convert to grain object.
+grain_bn <- as.grain(fitted)
+
+# Function to classify a single test case.
+# 
+# Args
+# ----
+# sample:   A single sample to classify.
+# bn:       The gRain network object.
+# target:   The target node.
+# evidence: The evidence nodes.
+classify <- function(sample, bn, target, evidence) {
+  evidence <- as.list(sample[evidence])
+  query <- bn |> setEvidence(evidence = evidence) |> querygrain(nodes=target)
+  query <- query[[target]]
+  ifelse(query["yes"] >= query["no"], "yes", "no")
+}
+
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+
+y_true  <- te$S
+cmatrix <- table(Predicted = y_pred, True = y_true)
+accuracy <-  sum(diag(cmatrix)) / sum(cmatrix)
+knitr::kable(cmatrix)
+
+# 3. Classifying using the Markov blanket
+
+target   <- "S"
+evidence <- mb(fitted, "S")  # the Markov blanket of S.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+y_true  <- te$S
+
+cmatrix <- table(Predicted = y_pred, True = y_true)
+knitr::kable(cmatrix)
+
+
+# 4. Naive Bayes classifier
+
+target  <- "S"
+arc_set <- cbind("S", setdiff(names(tr), c(target))) 
+nb       <- empty.graph(names(tr))  # initialize empty graph.
+arcs(nb) <- arc_set
+graphviz.plot(nb)
+
+fitted_nb <- bn.fit(nb, tr)
+
+grain_bn <- as.grain(fitted_nb)
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+
+y_true  <- te$S
+cmatrix <- table(Predicted = y_pred, True = y_true)
+knitr::kable(cmatrix)
+
+```
+

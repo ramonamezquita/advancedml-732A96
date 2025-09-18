@@ -1,0 +1,9 @@
+bin/
+*.pdf
+*.tex
+*.html
+.DS_Store
+.TinyTeX/
+.config/
+.local/
+.wget-hsts
