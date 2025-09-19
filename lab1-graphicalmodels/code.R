@@ -1,6 +1,12 @@
 library(bnlearn)
 library(gRain)
 
+# bnlearn leverages the modularity of BNs by:
+# 1. learning the structure of the network, or creating one manually, gives an object of class bn that encodes G;
+# 2. learning the parameters for a given structure starts from a bn object and gives an object of class bn.fit that encodes (G, Theta);
+# 3. inference takes an object of class bn.fit
+
+
 # 1. Non equivalent Bayesian networks
 data(asia)
 
@@ -54,20 +60,59 @@ fitted <- bn.fit(hc(asia), tr)
 grain_bn <- as.grain(fitted)
 
 # Function to classify a single test case.
-#
-# sample: A single sample to classify.
-# bn: The gRain network object.
-classify <- function(sample, bn, target_node) {
-  evidence <- as.list(sample)
-  evidence[[target_node]] <- NULL  # remove the target variable
-  query <- querygrain(setEvidence(bn, evidence = evidence), nodes = target_node)[[target_node]]
-  predicted <- ifelse(query["yes"] >= query["no"], "yes", "no")
-  return(predicted)
+# 
+# Args
+# ----
+# sample:   A single sample to classify.
+# bn:       The gRain network object.
+# target:   The target node.
+# evidence: The evidence nodes.
+classify <- function(sample, bn, target, evidence) {
+  evidence <- as.list(sample[evidence])
+  query <- bn |> setEvidence(evidence = evidence) |> querygrain(nodes=target)
+  query <- query[[target]]
+  ifelse(query["yes"] >= query["no"], "yes", "no")
 }
 
-y_pred <- apply(te, 1, classify, bn = grain_bn, target_node = "S")
-y_true <- te$S
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+
+y_true  <- te$S
 cmatrix <- table(Predicted = y_pred, True = y_true)
+accuracy <-  sum(diag(cmatrix)) / sum(cmatrix)
+knitr::kable(cmatrix)
+
+
+# 3. Classifying using the Markov blanket
+
+target   <- "S"
+evidence <- mb(fitted, "S")  # the Markov blanket of S.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+y_true  <- te$S
+
+cmatrix <- table(Predicted = y_pred, True = y_true)
+knitr::kable(cmatrix)
+
+
+# 4. Naive Bayes classifier
+
+target  <- "S"
+arc_set <- cbind("S", setdiff(names(tr), c(target))) 
+nb       <- empty.graph(names(tr))  # initialize empty graph.
+arcs(nb) <- arc_set
+graphviz.plot(nb)
+
+fitted_nb <- bn.fit(nb, tr)
+
+grain_bn <- as.grain(fitted_nb)
+target   <- "S"
+evidence <- setdiff(names(te), c(target))  # all except target.
+y_pred   <- apply(te, 1, classify, bn = grain_bn, target = target, evidence = evidence)
+
+y_true  <- te$S
+cmatrix <- table(Predicted = y_pred, True = y_true)
+knitr::kable(cmatrix)
 
 
 
