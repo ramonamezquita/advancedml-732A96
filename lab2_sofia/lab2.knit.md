@@ -5,9 +5,7 @@ output:
     latex_engine: xelatex
 
 ---
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(fig.width=4, fig.height=3, out.extra='trim=0 20 0 50,clip')
-```
+
 
 ## Task 1
 
@@ -15,7 +13,8 @@ In the first task we simply defined and created a hidden markov  model matching 
 The hidden and emission states were defined, as well as the transition and emission probabilities. 
 The hidden markov model was created with these definitions using the HMM package and the initHMM function
 
-```{r Task 1, warning = FALSE, message = FALSE, fig.show='hide'}
+
+``` r
 library(HMM)
 
 #Define the hidden states
@@ -60,18 +59,16 @@ hmm <- initHMM(States = states, Symbols = symbols, startProbs = startProbs,
 
 A 100 steps are simulated from the defined markov model
 
-```{r Task 2, warning = FALSE, message = FALSE, fig.show='hide'}
 
-
+``` r
 # Simulate 100 observations
 sim <- simHMM(hmm, 100)
-
 ```
 
 
 The emission probabilities were extracted to give the posterior distribution of the hidden state at each time step given the observed emission states of the run from task 3. The posterior was calculated by combining the posterior distributions calculated from the forward and the backward algorithm
-```{r Task 3, warning = FALSE, message = FALSE, fig.show='hide'}
 
+``` r
 #extract the emission states only
 observations <- as.integer(sim$observation)
 
@@ -87,7 +84,4 @@ beta <- exp(logBeta)
 #calculate the posterior distribution for zt at every t
 posterior <- alpha * beta
 posterior <- posterior / colSums(posterior)
-
-
-
 ```
