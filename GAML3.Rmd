@@ -98,11 +98,9 @@ GreedyPolicy <- function(x, y){
   #   An action, i.e. integer in {1,2,3,4}.
   
   #Your code here.
-  q_values <- q_table[x,y,]
-  #find index of maximal Q-values
-  imax <- which(q_values==max(q_values))
-  #sample from the maximum indexes
-  return(sample(imax, size=1))
+  max.action = which(q_table[x, y, ] == max(q_table[x, y, ]))
+  if (length(max.action) > 1) return(sample(max.action, 1))
+  else return(max.action)
   
 }
 
@@ -259,11 +257,11 @@ After 10 iterations, it does not seem like the sequential learning model has gai
 
 **Is the final greedy policy (after 10000 episodes) optimal for all states, i.e. not only for the initial state? Why/Why not?**
 
-Not necessarily. If we were to move according to the greedy policy, there are several tiles we could get stuck walking back and forth on and simply never get to a terminal state at all. There are also multiple states where the highest q-value does not lead to taking the shortest path to the +10 reward.
+It depends on what is necessarily meant by optimal. In the sense of reward it does seem like all possible tiles will eventually end up in the positive terminal state and clearly avoid the negative terminal states, which means that we will always get the same "optimal" total reward. But If we meant optimal by the shortest in terms of tiles stepped on then no. If we want the agent to prioritize the shortest path, we might decide to add a small negative reward on every non terminal.
 
 **Do the learned values in the Q-table reflect the fact that there are multiple paths?**
 
-Not always between runs. There are times where the q-values clearly prefer to go one way over the other, other times it does show some variability, and some times we get the problem of going back and forth on tiles forever if going strictly by the greedy choice. A way to solve this is to choose a higher $\epsilon$-value to allow the algorithm to explore other paths more often, or possibly choose a softer policy with probabilities of taking different actions based on the q-values.
+The q-values for the up and down actions on the states left to the negative terminal states does seem to be fairly close to each other. This indicates the potential to both go up and down when walking around the negative terminal states if using a soft approach of choosing the next action according to policy (for example epsilon greedy policy) 
 
 ## Environment B {#envB}
 
