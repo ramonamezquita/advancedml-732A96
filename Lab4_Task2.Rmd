@@ -1,0 +1,208 @@
+---
+title: "Lab4_Task2"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H',fig.height = 4, fig.align = 'center')
+```
+
+```{r 1}
+library("kernlab")
+
+#import the data set
+data <- read.csv("https://github.com/STIMALiU/AdvMLCourse/raw/master/GaussianProcess/Code/TempTullinge.csv", header=TRUE, sep=";")
+
+#extend the data with variable time, which just tracks days since start of the data set
+data$time <- 1:nrow(data)
+
+#day, which tracks which day or the year
+data$day <- (data$time %% 365)
+
+#important to replace each 0 with 365
+data$day[which(data$day == 0)] <- 365
+
+#use only every 6th element to speed up computations of the gp
+shorter_data <- data[seq(1,nrow(data), 5), ]
+
+#print the "true function" for 
+plot(shorter_data$temp, type = "l")
+
+#calculate distribution of estimated function from a gaussian process u
+model <- gausspr(temp ~ time + day, data = shorter_data)
+
+#use the predict function to get the posterior means for each data point
+posterior_means <- predict(model, shorter_data)
+plot(posterior_means, type = "l")
+
+#define our own square exponential kernel function
+
+se_kernel <- function(l, sigma){ 
+  k <- function(x, y) {
+    sigma^2 * exp(-sum((x - y)^2) / (2 * l^2))
+  }
+  class(k) <- "kernel" 
+  return(k) 
+}
+
+#evaluate covariance of x=1 and x' = 2 with our function
+
+kfun <- se_kernel(l = 1, sigma = 1)
+cov_1 <- kfun(1, 2)
+print(cov_1)
+
+print(cov_1)
+
+#use the kernelMatrix function
+#to compute the covariance matrix K(X, X*) for the input vectors X = (1, 3, 4)T and
+# X* = (2, 3, 4)T
+
+x <- c(1, 3, 4)
+y <- c(2, 3, 4)
+#we set l = 1
+l <- 1
+k <- se_kernel(l = 1, sigma = 1)
+cov_2 <- kernelMatrix(k, x, y)
+
+print(cov_2)
+
+```
+
+\section*{Gaussian Process Confidence Intervals}
+
+We model the temperature as a function of time using a Gaussian Process (GP):
+\[
+y_i = f(x_i) + \varepsilon_i, \quad \varepsilon_i \sim \mathcal{N}(0, \sigma_n^2), \quad f \sim \mathcal{GP}(0, k(\cdot,\cdot)),
+\]
+where $x_i$ represents the time, $y_i$ the observed temperature, $\varepsilon_i$ is Gaussian observational noise with variance $\sigma_n^2$, and $k$ is the squared exponential kernel:
+\[
+k(x,x') = \sigma_f^2 \exp\Big(- \frac{(x-x')^2}{2\ell^2}\Big),
+\]
+with hyper parameters $\sigma_f$ (signal amplitude) and $\ell$ (length-scale).
+
+Given training data $X = \{x_1, \dots, x_n\}$ and $y = \{y_1, \dots, y_n\}$, we construct the covariance matrix
+\[
+K = [k(x_i, x_j)]_{i,j=1}^n,
+\]
+and include the observational noise to obtain
+\[
+K_y = K + \sigma_n^2 I_n,
+\]
+where $I_n$ is the $n\times n$ identity matrix.
+
+The posterior distribution of the latent function $f$ at the training points is
+\[
+f \mid X, y \sim \mathcal{N}(m_{\text{post}}, \Sigma_{\text{post}}),
+\]
+with
+\[
+m_{\text{post}} = K K_y^{-1} y, \quad
+\Sigma_{\text{post}} = K - K K_y^{-1} K.
+\]
+
+The diagonal of $\Sigma_{\text{post}}$ gives the **pointwise variance** of the posterior at each training input. The corresponding **posterior standard deviations** are
+\[
+\text{sd}_i = \sqrt{[\Sigma_{\text{post}}]_{ii}}, \quad i=1,\dots,n.
+\]
+
+Finally, the **pointwise 95\% confidence intervals** for $f(x_i)$ are computed as
+\[
+\text{CI}_{95\%}(x_i) = m_{\text{post},i} \pm 1.96 \cdot \text{sd}_i.
+\]
+
+\noindent In practice, this means we compute the posterior mean as the center of the interval and use the square root of the posterior variance at each point to define the width of the interval, accounting for observational noise through $\sigma_n^2$.
+
+```{r 2}
+
+#set the kernel with l = 100 and sigma = 20 
+kern <- se_kernel(l = 100, sigma = 20)
+
+y <- shorter_data$temp
+x <- as.matrix(shorter_data$time)
+# GP with variance sigma_f^2
+
+#compute the variance from the residuals
+quad_fit <- lm(temp ~ time + I(time^2), data = shorter_data)
+sigma_n2 <- summary(quad_fit)$sigma^2
+
+
+
+#get the gp_model
+gp_model <- gausspr(x =x, y =y, kernel = kern,
+scaled = FALSE)
+
+#predict the posteriors
+
+posterior_mean <- predict(gp_model, x)
+
+#compute posterior variance manually for 95% bands 
+K <- as.matrix(kernelMatrix(kern, x))
+Ky <- K+diag(sigma_n2, nrow(K))
+
+# we could have technically just used the posterior_mean we got from predict(gp_model, x)
+#but it might differ slightly in the way that gausspr might have estimated sigma_n2 differently
+m_post <- K%*%solve(Ky, y)
+C_post <- K - K%*%solve(Ky, K)
+var_post <- pmax(0, diag(C_post))
+sd_post <- sqrt(var_post)
+upper <- m_post +1.96*sd_post
+lower <- m_post - 1.96*sd_post
+
+#plot the results
+plot(shorter_data$time, shorter_data$temp, pch = 16, cex = 0.6,
+     xlab = "Time", ylab = "Temperature", main = "GP posterior mean with 95% confidence interval")
+ord <- order(shorter_data$time)
+lines(shorter_data$time[ord], m_post[ord], col = "blue", lwd = 2)
+lines(shorter_data$time[ord], upper[ord], col = "red", lty = 2)
+lines(shorter_data$time[ord], lower[ord], col = "red", lty = 2)
+legend("topright", legend = c("data", "posterior mean", "95% bands"),
+       pch = c(16, NA, NA), lty = c(NA, 1, 2), col = c("black", "blue", "red"))
+
+
+```
+
+```{r 3}
+
+
+
+#important to take transpose to make sure that L is a lower triangular matrix which is expected
+#for the algorithm
+L <- t(chol(Ky))
+#predictive mean
+alpha <- backsolve(t(L), forwardsolve(L, y))
+#we can use K here since our train and test inputs are the same
+f_star <- t(K) %*% alpha
+
+#predictive covariance
+v <- forwardsolve(L, K)
+cov_f_star <- K - t(v)%*%v
+
+
+#posterior standard deviations
+sd_f_star <- sqrt(pmax(0, diag(cov_f_star)))
+
+n <- length(y)
+#code to compute the log likelihood of y given X
+#not really interesting in our case but worth knowing
+term1 <- -0.5 * sum(y * alpha)
+term2 <- -sum(log(diag(L)))
+term3 <- -0.5 * n * log(2 * pi)
+log_marginal_likelihood <- term1 + term2 + term3
+
+
+upper <- f_star +1.96*sd_f_star
+lower <- f_star - 1.96*sd_f_star
+
+
+#plot the results
+plot(shorter_data$time, shorter_data$temp, pch = 16, cex = 0.6,
+     xlab = "Time", ylab = "Temperature", main = "GP posterior mean with 95% confidence interval")
+ord <- order(shorter_data$time)
+lines(shorter_data$time[ord], f_star[ord], col = "blue", lwd = 2)
+lines(shorter_data$time[ord], upper[ord], col = "red", lty = 2)
+lines(shorter_data$time[ord], lower[ord], col = "red", lty = 2)
+legend("topright", legend = c("data", "posterior mean", "95% bands"),
+       pch = c(16, NA, NA), lty = c(NA, 1, 2), col = c("black", "blue", "red"))
+
+
+```
