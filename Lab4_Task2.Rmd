@@ -206,3 +206,4 @@ legend("topright", legend = c("data", "posterior mean", "95% bands"),
 
 
 ```
+Over all The results seem to be very similar to that of using the explicit inverse method of using solve but with some added numerical stability
